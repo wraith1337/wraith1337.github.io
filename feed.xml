@@ -5,8 +5,14 @@
 <link>https://wraith1337.github.io/</link>
 <description>Original software, interactive work, tech writing, reviews, and drawings by Wraith.</description>
 <language>en</language>
-<lastBuildDate>Thu, 17 Sep 2026 08:46:58 +0000</lastBuildDate>
+<lastBuildDate>Thu, 17 Sep 2026 12:38:00 +0000</lastBuildDate>
 <atom:link href="https://wraith1337.github.io/feed.xml" rel="self" type="application/rss+xml"/>
+<item>
+<title>Same teacher, two budgets: how small transformers learn chess</title>
+<link>https://wraith1337.github.io/posts/2026-09-17-searchless-chess-two-budgets.html</link>
+<guid isPermaLink="true">https://wraith1337.github.io/posts/2026-09-17-searchless-chess-two-budgets.html</guid>
+<description>Research note · AI · 2026. A 270M transformer plays 2895 blitz with zero search; a 230M build hits ~2000 with test-time search. Where the compute bill lands, and where the curves cross.</description>
+</item>
 <item>
 <title>I gave Ravager 2 both colors. It took both games.</title>
 <link>https://wraith1337.github.io/posts/2026-09-17-two-games-against-ravager-2.html</link>
