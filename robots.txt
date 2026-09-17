@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://wraith1337.github.io/sitemap.xml
