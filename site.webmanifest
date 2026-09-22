@@ -1,0 +1,24 @@
+{
+  "name": "Wraith1337",
+  "short_name": "Wraith",
+  "description": "Original software, interactive work, tech writing, reviews, and drawings by Wraith.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0e14",
+  "theme_color": "#0b0e14",
+  "icons": [
+    {
+      "src": "https://avatars.githubusercontent.com/u/330021616?v=4&size=192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://avatars.githubusercontent.com/u/330021616?v=4&size=512",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
