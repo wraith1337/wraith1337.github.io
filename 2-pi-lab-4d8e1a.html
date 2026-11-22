@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Pi from pure randomness</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0b0f0c;color:#d8e6dc;font:15px/1.45 system-ui,sans-serif;padding:16px;max-width:1100px;margin:auto}
+h1{font-size:22px;margin:4px 0}
+p.s{color:#8fa596;margin:4px 0 12px}
+.tabs button,.ctl button{background:#16221a;color:#d8e6dc;border:1px solid #2c4333;border-radius:8px;padding:8px 14px;font-size:15px;cursor:pointer}
+.tabs button.on{background:#2e7d4f;border-color:#43b06f}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.ctl label{color:#8fa596}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+canvas{width:100%;background:#0f1612;border:1px solid #223229;border-radius:8px;display:block}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:10px 0}
+.stat{background:#101a14;border:1px solid #223229;border-radius:8px;padding:8px 10px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.stat span{color:#8fa596;font-size:12px}
+.note{color:#8fa596;font-size:13px;margin-top:14px}
+h2{font-size:14px;color:#8fa596;margin:6px 0 4px;font-weight:600}
+</style></head><body>
+<h1>Pi from pure randomness</h1>
+<p class="s">No circle formula is used to draw the answer. Random points or random needles are thrown, and pi falls out of the counts.</p>
+<div class="tabs"><button id="tabDots" class="on">Random dots</button> <button id="tabNeedle">Buffon's needle</button></div>
+<div class="ctl">
+<button id="go">Start</button><button id="stop">Stop</button><button id="reset">Reset</button>
+<label>Speed <select id="spd"><option value="1">slow (watch each)</option><option value="50">normal</option><option value="1000" selected>fast</option><option value="20000">turbo</option></select></label>
+</div>
+<div class="stats">
+<div class="stat"><span>throws</span><b id="n">0</b></div>
+<div class="stat"><span id="hl">inside quarter circle</span><b id="hits">0</b></div>
+<div class="stat"><span>estimate of pi</span><b id="est">-</b></div>
+<div class="stat"><span>true pi</span><b>3.14159265</b></div>
+<div class="stat"><span>error</span><b id="err">-</b></div>
+</div>
+<div class="grid">
+<div><h2 id="t1">Dots in the unit square</h2><canvas id="c1" width="600" height="600"></canvas></div>
+<div>
+<h2>Estimate vs throws (log x axis). White line is true pi, shaded band is the typical 95% range</h2><canvas id="c2" width="600" height="290"></canvas>
+<h2 style="margin-top:12px">Error vs throws (log-log). Dashed line is the 1/sqrt(n) rate</h2><canvas id="c3" width="600" height="290"></canvas>
+</div></div>
+<p class="note" id="how"></p>
+<script>
+(function(){
+const PI=Math.PI;
+const $=id=>document.getElementById(id);
+const c1=$('c1'),x1=c1.getContext('2d'),c2=$('c2'),x2=c2.getContext('2d'),c3=$('c3'),x3=c3.getContext('2d');
+let mode='dots',n=0,hits=0,timer=null,hist=[],nextLog=1;
+const buf=new Uint32Array(4096);let bi=4096;
+function rnd(){if(bi>=4096){crypto.getRandomValues(buf);bi=0}return buf[bi++]/4294967296}
+// Buffon: needle length = line spacing = 1 (spacing 1 unit). P(cross)=2/pi.
+const LINES=6; // lines at y=0..LINES in unit spacing, drawing region height LINES
+function setMode(m){mode=m;$('tabDots').className=m==='dots'?'on':'';$('tabNeedle').className=m==='needle'?'on':'';reset();
+ $('hl').textContent=m==='dots'?'inside quarter circle':'needles crossing a line';
+ $('t1').textContent=m==='dots'?'Dots in the unit square':'Needles dropped on ruled paper (needle length = line gap)';
+ $('how').innerHTML=m==='dots'
+ ?'<b>How it counts:</b> each dot is a uniform random point (x, y) in a 1 by 1 square. The quarter circle of radius 1 covers pi/4 of the square, so the fraction of dots with x&sup2;+y&sup2;&lt;1 tends to pi/4. Estimate = 4 &times; inside / total. Randomness comes from the browser crypto generator.'
+ :'<b>How it counts:</b> each needle has the same length as the gap between lines. Its centre lands uniformly and its angle is uniform. The chance it crosses a line is 2/pi, so estimate = 2 &times; needles / crossings. (The angle is drawn using random numbers only; the circle constant is not used to make the answer.)';
+ draw1(true)}
+function reset(){stop();n=0;hits=0;hist=[];nextLog=1;ui();draw1(true);drawG()}
+function throwOne(){
+ if(mode==='dots'){const x=rnd(),y=rnd();const inside=x*x+y*y<1;n++;if(inside)hits++;dotQ.push([x,y,inside])}
+ else{const cy=rnd()*LINES,cx=rnd()*LINES;
+  // random direction without using pi: rejection sample in unit disc
+  let a,b,r;do{a=rnd()*2-1;b=rnd()*2-1;r=a*a+b*b}while(r>1||r<1e-6);
+  const l=Math.sqrt(r),dx=a/l*0.5,dy=b/l*0.5;
+  const y1=cy-dy,y2=cy+dy;const cross=Math.floor(y1)!==Math.floor(y2);
+  n++;if(cross)hits++;dotQ.push([cx-dx,y1,cx+dx,y2,cross])}
+ if(n>=nextLog||n<30){hist.push([n,est()]);nextLog=Math.max(n+1,Math.floor(n*1.04))}
+}
+function est(){return mode==='dots'?(hits?4*hits/n:NaN):(hits?2*n/hits:NaN)}
+let dotQ=[];
+function ui(){$('n').textContent=n.toLocaleString();$('hits').textContent=hits.toLocaleString();
+ const e=est();$('est').textContent=isNaN(e)?'-':e.toFixed(6);$('err').textContent=isNaN(e)?'-':Math.abs(e-PI).toExponential(2)}
+function draw1(clear){
+ if(clear){x1.fillStyle='#0f1612';x1.fillRect(0,0,600,600);
+  if(mode==='dots'){x1.strokeStyle='#2c4333';x1.strokeRect(1,1,598,598);x1.strokeStyle='#e8c14a';x1.lineWidth=2;x1.beginPath();x1.arc(0,600,598,-Math.PI/2,0);x1.stroke()}
+  else{x1.strokeStyle='#2c4333';x1.lineWidth=1;const s=600/LINES;for(let i=0;i<=LINES;i++){x1.beginPath();x1.moveTo(0,i*s);x1.lineTo(600,i*s);x1.stroke()}}
+  dotQ=[];return}
+ if(mode==='dots'){for(const d of dotQ){x1.fillStyle=d[2]?'#4aa3e8':'#e85a5a';x1.fillRect(d[0]*598,600-d[1]*598-1,2,2)}}
+ else{const s=600/LINES;x1.lineWidth=1.5;for(const d of dotQ){x1.strokeStyle=d[4]?'#4aa3e8':'rgba(232,90,90,.6)';x1.beginPath();x1.moveTo(d[0]*s,d[1]*s);x1.lineTo(d[2]*s,d[3]*s);x1.stroke()}}
+ dotQ=[]}
+function axes(x,w,h,pad){x.fillStyle='#0f1612';x.fillRect(0,0,w,h);x.strokeStyle='#223229';x.lineWidth=1;x.fillStyle='#8fa596';x.font='11px sans-serif'}
+function drawG(){
+ const W=600,H=290,P=36,maxN=Math.max(100,n);const lx=v=>P+(Math.log10(Math.max(v,1))/Math.log10(maxN))*(W-P-8);
+ axes(x2,W,H);const lo=2.6,hi=3.7;const ly=v=>H-22-(Math.min(hi,Math.max(lo,v))-lo)/(hi-lo)*(H-34);
+ for(let v=2.8;v<=3.6;v+=0.2){x2.beginPath();x2.moveTo(P,ly(v));x2.lineTo(W-8,ly(v));x2.stroke();x2.fillText(v.toFixed(1),4,ly(v)+4)}
+ // 95% band
+ const p=PI/4,q=mode==='dots'?null:null;x2.fillStyle='rgba(74,163,232,.15)';x2.beginPath();
+ const pts=[];for(let i=0;i<=120;i++){const k=Math.pow(maxN,i/120);const sd=mode==='dots'?4*Math.sqrt(p*(1-p)/k):PI*Math.sqrt((PI/2-1)/k);pts.push([k,sd*1.96])}
+ pts.forEach((t,i)=>{const X=lx(t[0]),Y=ly(PI+t[1]);i?x2.lineTo(X,Y):x2.moveTo(X,Y)});
+ for(let i=pts.length-1;i>=0;i--)x2.lineTo(lx(pts[i][0]),ly(PI-pts[i][1]));x2.fill();
+ x2.strokeStyle='#fff';x2.beginPath();x2.moveTo(P,ly(PI));x2.lineTo(W-8,ly(PI));x2.stroke();
+ x2.strokeStyle='#4aa3e8';x2.lineWidth=2;x2.beginPath();let st=false;for(const h of hist){if(isNaN(h[1]))continue;const X=lx(h[0]),Y=ly(h[1]);st?x2.lineTo(X,Y):x2.moveTo(X,Y);st=true}x2.stroke();x2.lineWidth=1;
+ for(let e=0;Math.pow(10,e)<=maxN;e++){x2.fillStyle='#8fa596';x2.fillText('10^'+e,lx(Math.pow(10,e))-8,H-6)}
+ // error graph
+ axes(x3,W,H);const eLo=-6,eHi=1;const ey=v=>H-22-(Math.min(eHi,Math.max(eLo,Math.log10(Math.max(v,1e-12))))-eLo)/(eHi-eLo)*(H-34);
+ for(let e=-5;e<=0;e++){x3.beginPath();x3.moveTo(P,ey(Math.pow(10,e)));x3.lineTo(W-8,ey(Math.pow(10,e)));x3.stroke();x3.fillText('1e'+e,2,ey(Math.pow(10,e))+4)}
+ x3.setLineDash([5,4]);x3.strokeStyle='#e8c14a';x3.beginPath();for(let i=0;i<=100;i++){const k=Math.pow(maxN,i/100);const v=1.6/Math.sqrt(k);const X=lx(k),Y=ey(v);i?x3.lineTo(X,Y):x3.moveTo(X,Y)}x3.stroke();x3.setLineDash([]);
+ x3.strokeStyle='#e85a5a';x3.lineWidth=2;x3.beginPath();st=false;for(const h of hist){if(isNaN(h[1]))continue;const X=lx(h[0]),Y=ey(Math.abs(h[1]-PI));st?x3.lineTo(X,Y):x3.moveTo(X,Y);st=true}x3.stroke();x3.lineWidth=1;
+ for(let e=0;Math.pow(10,e)<=maxN;e++){x3.fillStyle='#8fa596';x3.fillText('10^'+e,lx(Math.pow(10,e))-8,H-6)}
+}
+function step(){const k=+$('spd').value;const per=k<=50?k:k;const t0=performance.now();let c=0;
+ const batch=k===1?1:Math.max(1,Math.round(k/60));
+ for(let i=0;i<batch;i++)throwOne();draw1(false);ui();drawG()}
+function start(){if(timer)return;const k=+$('spd').value;timer=setInterval(step,k===1?120:16)}
+function stop(){if(timer){clearInterval(timer);timer=null}}
+$('go').onclick=start;$('stop').onclick=stop;$('reset').onclick=reset;
+$('tabDots').onclick=()=>setMode('dots');$('tabNeedle').onclick=()=>setMode('needle');
+$('spd').onchange=()=>{if(timer){stop();start()}};
+window.piLab={get state(){return{mode,n,hits,est:est()}},throwMany(k){for(let i=0;i<k;i++)throwOne();draw1(false);ui();drawG()},setMode};
+setMode('dots');
+})();
+</script></body></html>
