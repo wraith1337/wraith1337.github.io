@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Gambler's ruin: $1 bets, win $2 or lose $1</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0b0f0c;color:#d8e6dc;font:15px/1.45 system-ui,sans-serif;padding:16px;max-width:1100px;margin:auto}
+h1{font-size:22px;margin:4px 0}
+p.s{color:#8fa596;margin:4px 0 12px}
+.ctl button{background:#16221a;color:#d8e6dc;border:1px solid #2c4333;border-radius:8px;padding:8px 14px;font-size:15px;cursor:pointer}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.ctl label{color:#8fa596}
+.sliders{display:flex;flex-wrap:wrap;gap:18px;margin:6px 0 2px}
+.sliders label{color:#8fa596;font-size:13px;display:flex;flex-direction:column;gap:2px}
+.sliders input[type=range]{width:170px;accent-color:#43b06f}
+.sliders b{color:#d8e6dc;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+canvas{width:100%;background:#0f1612;border:1px solid #223229;border-radius:8px;display:block}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:10px 0}
+.stat{background:#101a14;border:1px solid #223229;border-radius:8px;padding:8px 10px}
+.stat b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.stat span{color:#8fa596;font-size:12px}
+.note{color:#8fa596;font-size:13px;margin-top:14px}
+h2{font-size:14px;color:#8fa596;margin:6px 0 4px;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+th{color:#8fa596;text-align:left;font-weight:600;padding:3px 8px 3px 0;border-bottom:1px solid #223229}
+td{padding:3px 8px 3px 0;border-bottom:1px solid #16221a}
+td.w{color:#7dd87d}td.l{color:#e87a7a}
+.board{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:760px){.board{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Gambler's ruin, with a twist</h1>
+<p class="s">Every round, each player stakes $1 on a random heads/tails call. Match the coin and they gain $2, miss and the $1 is gone. Start at $10, stop at $0 (ruined) or $100 (target). That $2 payout changes everything: watch thousands of players find out how much.</p>
+<div class="sliders">
+<label>start $a <input type="range" id="sA" min="1" max="50" value="10"><b id="vA">$10</b></label>
+<label>target $N <input type="range" id="sN" min="20" max="200" value="100"><b id="vN">$100</b></label>
+<label>coin bias P(heads) <input type="range" id="sP" min="0.30" max="0.70" step="0.01" value="0.50"><b id="vP">0.50</b></label>
+</div>
+<div class="ctl">
+<button id="go">Start</button><button id="stop">Stop</button><button id="reset">Reset</button>
+<label>Speed <select id="spd"><option value="1">slow</option><option value="20">normal</option><option value="200" selected>fast</option><option value="2000">turbo</option></select></label>
+</div>
+<div class="stats">
+<div class="stat"><span>players finished</span><b id="n">0</b></div>
+<div class="stat"><span>ruined ($0)</span><b id="ruined">0</b></div>
+<div class="stat"><span>reached target</span><b id="won">0</b></div>
+<div class="stat"><span>win rate</span><b id="rate">-</b></div>
+<div class="stat"><span>theory P(target)</span><b id="theory">-</b></div>
+<div class="stat"><span>avg flips per game</span><b id="avgf">-</b></div>
+</div>
+<div class="grid">
+<div><h2 id="t1">Bankroll paths, one line per player (sample)</h2><canvas id="c1" width="600" height="600"></canvas></div>
+<div>
+<h2>Win rate vs players finished (log x axis). White line is theory, shaded band is the typical 95% range</h2><canvas id="c2" width="600" height="290"></canvas>
+<h2 style="margin-top:12px">Where players ended: histogram of final bankroll</h2><canvas id="c3" width="600" height="290"></canvas>
+</div></div>
+<h2 style="margin-top:14px">Every player's ending: one dot per player, green hit the target, red went broke</h2>
+<canvas id="c4" width="1200" height="220" style="width:100%"></canvas>
+<div class="board">
+<div><h2>Leaderboard: fastest climbs to the target</h2><table id="lbW"><thead><tr><th>#</th><th>player</th><th>ended</th><th>flips</th><th>peak</th></tr></thead><tbody></tbody></table></div>
+<div><h2>Leaderboard: longest survivors before ruin</h2><table id="lbL"><thead><tr><th>#</th><th>player</th><th>ended</th><th>flips</th><th>peak</th></tr></thead><tbody></tbody></table></div>
+</div>
+<p class="note" id="how"></p>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const c1=$('c1'),x1=c1.getContext('2d'),c2=$('c2'),x2=c2.getContext('2d'),c3=$('c3'),x3=c3.getContext('2d'),c4=$('c4'),x4=c4.getContext('2d');
+let A=10,N=100,P=0.5;
+let n=0,wins=0,flipsTot=0,timer=null,hist=[],nextLog=1;
+let paths=[],maxFlips=1,lbWin=[],lbLoss=[];
+const MAXP=30,LB=8,BINS=26;
+let histo=new Array(BINS).fill(0);
+const buf=new Uint32Array(4096);let bi=4096;
+function rnd(){if(bi>=4096){crypto.getRandomValues(buf);bi=0}return buf[bi++]/4294967296}
+// steps: +2 on win, -1 on loss. win when bankroll >= N. ruin at 0.
+// exact theory: solve f(i) = P*f(i+2) + (1-P)*f(i-1), f(0)=0, f(i>=N)=1
+// and mean length g(i) = 1 + P*g(i+2) + (1-P)*g(i-1), g(0)=g(i>=N)=0
+function solveTheory(){
+ // each round the call is random (50/50), so P(match) is 1/2 whatever the coin bias is
+ const M=N-1,pE=0.5,q=1-pE;
+ const mA=[];for(let i=0;i<M;i++)mA.push(new Float64Array(M));
+ const bW=new Float64Array(M),bG=new Float64Array(M);
+ for(let i=1;i<=N-1;i++){const r=i-1;
+  mA[r][r]=1;
+  if(i+2<=N-1)mA[r][i+2-1]=-pE;
+  if(i-1>=1)mA[r][i-1-1]=-q;
+  bW[r]=(i+2>=N)?pE:0;
+  bG[r]=1}
+ // gaussian elimination with partial pivoting, solve both RHS together
+ for(let col=0;col<M;col++){
+  let piv=col;for(let r=col+1;r<M;r++)if(Math.abs(mA[r][col])>Math.abs(mA[piv][col]))piv=r;
+  if(piv!==col){const t=mA[col];mA[col]=mA[piv];mA[piv]=t;
+   const tw=bW[col];bW[col]=bW[piv];bW[piv]=tw;
+   const tg=bG[col];bG[col]=bG[piv];bG[piv]=tg}
+  const d=mA[col][col];if(Math.abs(d)<1e-12)continue;
+  for(let r=col+1;r<M;r++){const f=mA[r][col]/d;if(f===0)continue;
+   for(let c=col;c<M;c++)mA[r][c]-=f*mA[col][c];
+   bW[r]-=f*bW[col];bG[r]-=f*bG[col]}}
+ const xW=new Float64Array(M),xG=new Float64Array(M);
+ for(let r=M-1;r>=0;r--){let s1=bW[r],s2=bG[r];
+  for(let c=r+1;c<M;c++){s1-=mA[r][c]*xW[c];s2-=mA[r][c]*xG[c]}
+  xW[r]=s1/mA[r][r];xG[r]=s2/mA[r][r]}
+ return{pWin:xW[A-1],meanFlips:xG[A-1]}
+}
+let TH=solveTheory();
+function playGame(sample){
+ let b=A,f=0,peak=A;const rec=sample?[b]:null;
+ const cap=Math.max(2e6,50*TH.meanFlips+1e5);
+ const stride=Math.max(1,Math.floor(cap/4000));
+ while(b>0&&b<N&&f<cap){const call=rnd()<0.5,coin=rnd()<P;if(call===coin)b+=2;else b-=1;f++;if(b>peak)peak=b;if(rec&&(f%stride===0||b<=0||b>=N))rec.push(Math.max(0,b))}
+ if(rec&&rec[rec.length-1]!==b)rec.push(Math.max(0,b));
+ n++;flipsTot+=f;const won=b>=N;if(won)wins++;
+ if(rec){paths.push({pts:rec,won,f});if(paths.length>MAXP)paths.shift()}
+ if(f>maxFlips)maxFlips=f;
+ const row={id:n,won,end:Math.max(0,b),f,peak};
+ if(won){lbWin.push(row);lbWin.sort((x,y)=>x.f-y.f);if(lbWin.length>LB)lbWin.pop()}
+ else{lbLoss.push(row);lbLoss.sort((x,y)=>y.f-x.f);if(lbLoss.length>LB)lbLoss.pop()}
+ dotQ.push(row);
+ if(n>=nextLog||n<30){hist.push([n,wins/n]);nextLog=Math.max(n+1,Math.floor(n*1.04))}
+}
+let dotQ=[];
+function recordHisto(r){const i=Math.min(BINS-1,Math.floor(Math.min(r.end,N)/(N+1)*BINS));histo[i]++}
+function axes(x,w,h){x.fillStyle='#0f1612';x.fillRect(0,0,w,h);x.strokeStyle='#223229';x.lineWidth=1;x.fillStyle='#8fa596';x.font='11px sans-serif'}
+function drawPaths(){
+ const W=600,H=600,pad=34,top=N+2;
+ axes(x1,W,H);
+ const lx=v=>pad+(v/maxFlips)*(W-pad-8);
+ const ly=v=>H-26-(v/top)*(H-40);
+ const tick=Math.max(1,Math.round(N/5));
+ for(let v=0;v<=N;v+=tick){x1.beginPath();x1.moveTo(pad,ly(v));x1.lineTo(W-8,ly(v));x1.stroke();x1.fillText('$'+v,4,ly(v)+4)}
+ x1.strokeStyle='#e8c14a';x1.setLineDash([5,4]);x1.beginPath();x1.moveTo(pad,ly(A));x1.lineTo(W-8,ly(A));x1.stroke();x1.setLineDash([]);
+ x1.fillStyle='#e8c14a';x1.fillText('start $'+A,pad+4,ly(A)-5);
+ for(const p of paths){
+  const step=p.f/(p.pts.length-1||1);
+  x1.strokeStyle=p.won?'rgba(125,216,125,.75)':'rgba(232,90,90,.55)';x1.lineWidth=1.4;x1.beginPath();
+  for(let i=0;i<p.pts.length;i++){const X=lx(i*step),Y=ly(p.pts[i]);i?x1.lineTo(X,Y):x1.moveTo(X,Y)}
+  x1.stroke()}
+ x1.lineWidth=1;x1.fillStyle='#8fa596';x1.fillText('flips ->',W-52,H-8);
+}
+function drawG(){
+ const W=600,H=290,Pd=36,maxN=Math.max(100,n);const lx=v=>Pd+(Math.log10(Math.max(v,1))/Math.log10(maxN))*(W-Pd-8);
+ const th=TH.pWin;
+ // win rate graph
+ axes(x2,W,H);const lo=0,hi=Math.min(1,Math.max(0.25,th*1.6+0.05));const ly=v=>H-22-(Math.min(hi,Math.max(lo,v))-lo)/(hi-lo)*(H-34);
+ const step=hi/4;for(let v=0;v<=hi+1e-9;v+=step){x2.beginPath();x2.moveTo(Pd,ly(v));x2.lineTo(W-8,ly(v));x2.stroke();x2.fillText(v.toFixed(2),2,ly(v)+4)}
+ x2.fillStyle='rgba(74,163,232,.15)';x2.beginPath();
+ const pts=[];for(let i=0;i<=120;i++){const k=Math.pow(maxN,i/120);pts.push([k,1.96*Math.sqrt(th*(1-th)/k)])}
+ pts.forEach((t,i)=>{const X=lx(t[0]),Y=ly(th+t[1]);i?x2.lineTo(X,Y):x2.moveTo(X,Y)});
+ for(let i=pts.length-1;i>=0;i--)x2.lineTo(lx(pts[i][0]),ly(th-pts[i][1]));x2.fill();
+ x2.strokeStyle='#fff';x2.beginPath();x2.moveTo(Pd,ly(th));x2.lineTo(W-8,ly(th));x2.stroke();
+ x2.strokeStyle='#4aa3e8';x2.lineWidth=2;x2.beginPath();let st=false;for(const h of hist){const X=lx(h[0]),Y=ly(h[1]);st?x2.lineTo(X,Y):x2.moveTo(X,Y);st=true}x2.stroke();x2.lineWidth=1;
+ for(let e=0;Math.pow(10,e)<=maxN;e++){x2.fillStyle='#8fa596';x2.fillText('10^'+e,lx(Math.pow(10,e))-8,H-6)}
+ // histogram of final bankroll
+ axes(x3,W,H);
+ let mx=1;for(let i=0;i<BINS;i++){if(histo[i]>mx)mx=histo[i]}
+ const by=v=>H-22-(v/mx)*(H-40);
+ for(const g of[0,0.25,0.5,0.75,1]){const v=Math.round(mx*g);x3.beginPath();x3.moveTo(Pd,by(v));x3.lineTo(W-8,by(v));x3.stroke();x3.fillText(v,4,by(v)+4)}
+ for(let i=0;i<BINS;i++){const X=Pd+(i/BINS)*(W-Pd-8),W2=(W-Pd-8)/BINS-1;
+  x3.fillStyle=i===0?'#e85a5a':(i>=BINS-2?'#7dd87d':'rgba(74,163,232,.5)');
+  x3.fillRect(X,by(histo[i]),W2,H-22-by(histo[i]))}
+ x3.fillStyle='#8fa596';x3.fillText('$0',Pd,by(0)+12);x3.fillText('$'+N,W-34,by(0)+12);
+ // per-player endings scatter (incremental)
+ if(dotQ.length){
+  for(const r of dotQ){
+   const X=Pd+((r.id-1)/Math.max(1000,n*1.2))*(W*2-Pd-8);
+   const jit=(rnd()-0.5)*10;
+   const Y=H-16-(Math.min(N,Math.max(0,r.end))/N)*(H-36)+jit;
+   x4.fillStyle=r.won?'rgba(125,216,125,.8)':'rgba(232,90,90,.7)';
+   x4.fillRect(X,Y,2,2)}
+  dotQ=[]}
+}
+function draw4init(){
+ const W=1200,H=220,Pd=36;
+ axes(x4,W,H);
+ const tick=Math.max(1,Math.round(N/4));
+ for(let v=0;v<=N;v+=tick){const Y=H-16-(v/N)*(H-36);x4.beginPath();x4.moveTo(Pd,Y);x4.lineTo(W-8,Y);x4.stroke();x4.fillText('$'+v,4,Y+4)}
+ x4.fillText('player # ->',W-70,H-4);
+}
+function boards(){
+ const fill=(t,rows)=>{const tb=$(t).tBodies[0];tb.innerHTML='';rows.forEach((r,i)=>{const tr=document.createElement('tr');
+  tr.innerHTML='<td>'+(i+1)+'</td><td>player '+r.id.toLocaleString()+'</td><td class="'+(r.won?'w':'l')+'">'+(r.won?'$'+r.end+' won':'$0 ruined')+'</td><td>'+r.f.toLocaleString()+'</td><td>$'+r.peak+'</td>';tb.appendChild(tr)});
+  if(!rows.length){const tr=document.createElement('tr');tr.innerHTML='<td colspan="5" style="color:#8fa596">none yet</td>';tb.appendChild(tr)}};
+ fill('lbW',lbWin);fill('lbL',lbLoss);
+}
+function ui(){$('n').textContent=n.toLocaleString();$('ruined').textContent=(n-wins).toLocaleString();$('won').textContent=wins.toLocaleString();
+ $('rate').textContent=n?((wins/n*100).toFixed(2)+'%'):'-';
+ $('theory').textContent=(TH.pWin*100).toFixed(2)+'%';
+ $('avgf').textContent=n?Math.round(flipsTot/n).toLocaleString()+' (theory '+Math.round(TH.meanFlips).toLocaleString()+')':'-'}
+function step(){const k=+$('spd').value;
+ const batch=k===1?1:k===20?3:k===200?40:600;
+ for(let i=0;i<batch;i++)playGame(paths.length<MAXP||rnd()<0.02);
+ for(const r of dotQ)recordHisto(r);
+ drawPaths();ui();drawG();boards()}
+function start(){if(timer)return;const k=+$('spd').value;timer=setInterval(step,k===1?150:16)}
+function stop(){if(timer){clearInterval(timer);timer=null}}
+function reset(){stop();TH=solveTheory();n=0;wins=0;flipsTot=0;hist=[];nextLog=1;paths=[];maxFlips=1;lbWin=[];lbLoss=[];dotQ=[];histo=new Array(BINS).fill(0);
+ const drift=0.5;
+ $('how').innerHTML='<b>How it works:</b> each player starts at $'+A+' and every round stakes $1 on a random heads/tails call. The coin lands heads with P='+P.toFixed(2)+', but a random call keeps the match chance at exactly 1/2 (try dragging the bias slider: the outcome math does not move). Match pays +$2, miss takes the $1, and the game ends at $0 or $'+N+' or more. Exact theory (solving the ruin equations for steps +2/-1 at 50/50): P(target) = '+(TH.pWin*100).toFixed(2)+'%, average game '+Math.round(TH.meanFlips).toLocaleString()+' flips. Expected drift is +$0.50 per round, so most players get there. Compare with a plain $1/$1 fair coin, where P(target) would be only a/N = '+(A/N*100).toFixed(1)+'%. Every dot on the bottom strip is one finished player. Randomness (calls and coins) comes from the browser crypto generator, nothing is scripted.';
+ ui();drawPaths();drawG();draw4init();boards()}
+function setParams(){$('vA').textContent='$'+A;$('vN').textContent='$'+N;$('vP').textContent=P.toFixed(2);reset()}
+$('sA').oninput=e=>{A=+e.target.value;if(A>=N){N=A+10;$('sN').value=N}setParams()};
+$('sN').oninput=e=>{N=+e.target.value;if(N<=A){A=Math.max(1,N-10);$('sA').value=A}setParams()};
+$('sP').oninput=e=>{P=+e.target.value;setParams()};
+$('go').onclick=start;$('stop').onclick=stop;$('reset').onclick=reset;
+$('spd').onchange=()=>{if(timer){stop();start()}};
+window.ruinLab={get state(){return{A,N,P,n,wins,rate:n?wins/n:null,theory:TH.pWin,meanFlips:TH.meanFlips,avgFlips:n?flipsTot/n:null}},runGames(k){for(let i=0;i<k;i++)playGame(false);for(const r of dotQ)recordHisto(r);drawPaths();ui();drawG();boards()},set(A2,N2,P2){A=A2;N=N2;P=P2;$('sA').value=A;$('sN').value=N;$('sP').value=P;setParams()}};
+setParams();
+})();
+</script></body></html>
